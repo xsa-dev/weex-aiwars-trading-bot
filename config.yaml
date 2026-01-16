@@ -1,0 +1,40 @@
+indicators:
+  rsi:
+    period: 14
+    overbought: 70
+    oversold: 30
+
+  supertrend:
+    length: 10
+    multiplier: 3.0
+
+  adx:
+    period: 14
+    threshold: 25
+
+  macd:
+    fast: 12
+    slow: 26
+    signal: 9
+
+  momentum:
+    period: 10
+
+  atr:
+    period: 14
+
+  bollinger:
+    length: 20
+    std: 2
+
+  stoch_rsi:
+    period: 14
+
+  vwma:
+    period: 20
+
+timeframes:
+  - "1m"
+  - "15m"
+  - "1h"
+  - "4h"
