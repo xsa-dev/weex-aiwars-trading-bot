@@ -114,15 +114,6 @@ async def trade_loop():
                                 price_float = float(price)
                             except (ValueError, TypeError):
                                 pass
-                    elif isinstance(ticker, list) and len(ticker) > 0:
-                        first = ticker[0]
-                        if isinstance(first, dict):
-                            price = first.get("last") or first.get("price") or "N/A"
-                            if price != "N/A":
-                                try:
-                                    price_float = float(price)
-                                except (ValueError, TypeError):
-                                    pass
 
                     add_log(
                         f"{coin}: RSI={indicators_1h.get('rsi', 'N/A')} ({indicators_1h.get('rsi_signal', '')}), "
@@ -252,21 +243,6 @@ async def trade_loop():
                             "imbalance": imbalance,
                         }
                         add_order_book_snapshot(coin, snapshot)
-
-                    elif isinstance(ticker, list) and len(ticker) > 0:
-                        first = ticker[0]
-                        if isinstance(first, dict):
-                            price = first.get("last") or first.get("price") or "N/A"
-                            add_log(f"{coin}: price={price} (from list)")
-                        else:
-                            add_log(
-                                f"{coin}: list first item not dict: {first}",
-                                level="WARNING",
-                            )
-                    else:
-                        add_log(
-                            f"{coin}: unexpected format {type(ticker)}", level="WARNING"
-                        )
 
                 except Exception as e:
                     add_log(f"{coin} ticker error: {e}", level="ERROR")
