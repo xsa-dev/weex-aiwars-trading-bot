@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Any, Dict
 
 from weex_client import WeexAsyncClient
+from weex_client.exceptions import WEEXError
 
 
 class AILogStub:
@@ -156,8 +157,25 @@ class AILogStub:
                     order_id=payload.get("orderId"),
                 )
 
-                # Check for success - code 00000 means success
-                is_success = getattr(response, 'is_success', False) or response.code == "00000"
+                # Check for success - code 00000 means success (per Weex API docs)
+                code = getattr(response, "code", None)
+                msg = getattr(response, "msg", "")
+
+                # DEBUG: Log what we received
+                if self._logger:
+                    self._logger.warning(
+                        f"[AI_LOG] Response debug: code={repr(code)} (type={type(code).__name__}), "
+                        f"msg={repr(msg)}, is_success attr={getattr(response, 'is_success', 'N/A')}"
+                    )
+
+                # Success codes: 00000 (string), 0 (int)
+                success_codes = {0, "00000"}
+                is_success = (
+                    getattr(response, "is_success", False) or code in success_codes
+                )
+
+                # If code is success but msg says "API error", still treat as success
+                # This handles the case where Weex returns success with a misleading message
                 if is_success:
                     self._upload_stats["success"] += 1
                     if self._logger:
@@ -169,11 +187,42 @@ class AILogStub:
                         )
                     return True
                 else:
-                    last_error = f"API error: {response.msg}"
+                    # Extract error message from response.msg (might be dict with 'error')
+                    if isinstance(msg, dict) and msg.get("error"):
+                        error_detail = msg["error"].get("message", str(msg))
+                    else:
+                        error_detail = str(msg)
+                    last_error = f"API error: {error_detail}"
                     if self._logger:
                         self._logger.warning(
-                            f"[AI_LOG] Weex API error: {response.msg}",
-                            code=response.code,
+                            f"[AI_LOG] Weex API error: {error_detail}",
+                            code=code,
+                            attempt=attempt + 1,
+                        )
+
+            except WEEXError as e:
+                # Check if this is actually a success (code=00000 means success)
+                code = getattr(e, "code", None)
+                success_codes = {0, "00000"}
+
+                if code in success_codes:
+                    # API returned code=00000 - this is success!
+                    self._upload_stats["success"] += 1
+                    if self._logger:
+                        self._logger.info(
+                            "[AI_LOG] Uploaded successfully to Weex (code=00000)",
+                            stage=payload["stage"],
+                            order_id=payload.get("orderId"),
+                            attempt=attempt + 1,
+                        )
+                    return True
+                else:
+                    # Real error
+                    last_error = f"WEEXError: {e.message} (code={code})"
+                    if self._logger:
+                        self._logger.warning(
+                            f"[AI_LOG] Weex API error: {e.message} (code={code})",
+                            code=code,
                             attempt=attempt + 1,
                         )
 
@@ -255,13 +304,7 @@ class AILogStub:
 
         # Extract real order_id from order_request, fallback to timestamp
         real_order_id = order_request.get("order_id")
-        if real_order_id:
-            try:
-                order_id_int = int(real_order_id)
-            except (ValueError, TypeError):
-                order_id_int = int(time.time() * 1000)
-        else:
-            order_id_int = int(time.time() * 1000)
+        order_id_int = int(real_order_id)
 
         return {
             "orderId": order_id_int,

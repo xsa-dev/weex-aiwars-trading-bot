@@ -209,7 +209,7 @@ class PositionManager:
 
             # Add stop loss and take profit if available
             stop_loss_price = str(decision.stop_loss) if decision.stop_loss else None
-            
+
             order_request = PlaceOrderRequest(
                 symbol=coin,
                 client_oid=decision.correlation_id,
@@ -218,6 +218,7 @@ class PositionManager:
                 order_type="1",  # Post-Only order (required by weex_client validation)
                 match_price="1",  # Use market price
                 preset_stop_loss_price=stop_loss_price,  # Stop loss
+                preset_take_profit_price=str(decision.take_profit) if decision.take_profit else None,  # Take profit
             )
 
             response = await self.client.place_order(order_request)
@@ -228,12 +229,20 @@ class PositionManager:
             if isinstance(response, list) and len(response) > 0:
                 # Response is a list of close results
                 first_result = response[0]
-                order_id = first_result.get("successOrderId") or first_result.get("orderId")
+                order_id = first_result.get("successOrderId") or first_result.get(
+                    "orderId"
+                )
                 if not first_result.get("success"):
-                    raise Exception(f"Close failed: {first_result.get('errorMessage', 'Unknown error')}")
+                    raise Exception(
+                        f"Close failed: {first_result.get('errorMessage', 'Unknown error')}"
+                    )
             elif isinstance(response, dict):
-                # Fallback for dict response
-                order_id = response.get("data", {}).get("orderId") or response.get("orderId")
+                # Response is a dict with order_id at top level (from weex_client place_order)
+                order_id = (
+                    response.get("order_id")
+                    or response.get("data", {}).get("orderId")
+                    or response.get("orderId")
+                )
 
             # Log AI decision
             if self.ai_logger and order_id:
@@ -258,28 +267,16 @@ class PositionManager:
 
             add_log(
                 f"{coin}: Position opened successfully",
-                data={"order_id": order_id, "type": order_type_value, "size": size, "stop_loss": decision.stop_loss},
+                data={
+                    "order_id": order_id,
+                    "type": order_type_value,
+                    "size": size,
+                    "stop_loss": decision.stop_loss,
+                },
                 coin=coin,
             )
 
-            # Place take profit order if configured
-            if decision.take_profit:
-                # Wait a bit for position to be created
-                await asyncio.sleep(1)
-                try:
-                    await self._place_take_profit(
-                        symbol=coin,
-                        position_side="long" if decision.signal == "LONG" else "short",
-                        size=size,
-                        trigger_price=str(decision.take_profit),
-                        correlation_id=decision.correlation_id,
-                    )
-                except Exception as tp_error:
-                    add_log(
-                        f"{coin}: Failed to place take profit order: {tp_error}",
-                        level="WARNING",
-                        coin=coin,
-                    )
+
 
             return ActionResult(
                 coin=coin,
@@ -328,12 +325,18 @@ class PositionManager:
             if isinstance(response, list) and len(response) > 0:
                 # Response is a list of close results
                 first_result = response[0]
-                order_id = first_result.get("successOrderId") or first_result.get("orderId")
+                order_id = first_result.get("successOrderId") or first_result.get(
+                    "orderId"
+                )
                 if not first_result.get("success"):
-                    raise Exception(f"Close failed: {first_result.get('errorMessage', 'Unknown error')}")
+                    raise Exception(
+                        f"Close failed: {first_result.get('errorMessage', 'Unknown error')}"
+                    )
             elif isinstance(response, dict):
                 # Fallback for dict response
-                order_id = response.get("data", {}).get("orderId") or response.get("orderId")
+                order_id = response.get("data", {}).get("orderId") or response.get(
+                    "orderId"
+                )
 
             add_log(
                 f"{coin}: Position closed successfully",
@@ -430,7 +433,7 @@ class PositionManager:
     ) -> None:
         """Place a take profit order using the TP/SL API."""
         tp_client_oid = f"tp_{correlation_id}"
-        
+
         # Weex TP/SL API expects uppercase positionSide
         tp_payload = {
             "symbol": symbol,
@@ -441,20 +444,20 @@ class PositionManager:
             "size": size,
             "positionSide": position_side.upper(),  # Ensure uppercase
         }
-        
+
         add_log(
             f"{symbol}: Placing TP order at {trigger_price}",
             data={"payload": tp_payload},
             coin=symbol,
         )
-        
+
         # Call Weex TP/SL API
         tp_response = await self.client.request(
             method="POST",
             url_or_path="/capi/v2/order/placeTpSlOrder",
             json=tp_payload,
         )
-        
+
         add_log(
             f"{symbol}: Take profit order placed at {trigger_price}",
             data={"tp_response": tp_response},
@@ -526,8 +529,6 @@ async def close_all_positions() -> dict[str, dict]:
                     level="WARNING",
                     coin=symbol,
                 )
-
-
 
             except Exception as e:
                 results[symbol] = {
