@@ -77,8 +77,17 @@ class PositionManager:
 
                 market = market_data.get(decision.coin)
                 # Extract price from ticker dict (MarketData doesn't have .price attribute)
-                if market and hasattr(market, 'ticker') and isinstance(market.ticker, dict):
-                    current_price = float(market.ticker.get('last') or market.ticker.get('price') or market.ticker.get('lastPrice') or 0)
+                if (
+                    market
+                    and hasattr(market, "ticker")
+                    and isinstance(market.ticker, dict)
+                ):
+                    current_price = float(
+                        market.ticker.get("last")
+                        or market.ticker.get("price")
+                        or market.ticker.get("lastPrice")
+                        or 0
+                    )
                 else:
                     current_price = 0
 
@@ -122,21 +131,21 @@ class PositionManager:
             return results
 
         # Real trading mode
-        # for decision in decisions:
-        #     try:
-        #         result = await self._execute_decision(decision, market_data)
-        #         results.append(result)
-        #     except Exception as e:
-        #         results.append(
-        #             ActionResult(
-        #                 coin=decision.coin,
-        #                 success=False,
-        #                 action_type=decision.action_type,
-        #                 error=str(e),
-        #             )
-        #         )
+        for decision in decisions:
+            try:
+                result = await self._execute_decision(decision, market_data)
+                results.append(result)
+            except Exception as e:
+                results.append(
+                    ActionResult(
+                        coin=decision.coin,
+                        success=False,
+                        action_type=decision.action_type,
+                        error=str(e),
+                    )
+                )
 
-        # return results
+        return results
 
     async def _execute_decision(
         self,
@@ -185,7 +194,9 @@ class PositionManager:
         size: str,
     ) -> ActionResult:
         """Open a new position."""
-        side = "BUY" if decision.signal == "LONG" else "SELL"
+        # Weex futures API uses 'type' field:
+        # 1 = Open long, 2 = Open short, 3 = Close long, 4 = Close short
+        order_type_value = "1" if decision.signal == "LONG" else "2"
 
         add_log(
             f"{coin}: Opening {decision.signal} position",
@@ -196,31 +207,40 @@ class PositionManager:
         try:
             await self.rate_limiter.wait()
 
+            # Add stop loss and take profit if available
+            stop_loss_price = str(decision.stop_loss) if decision.stop_loss else None
+            
             order_request = PlaceOrderRequest(
                 symbol=coin,
                 client_oid=decision.correlation_id,
                 size=size,
-                side=side,
-                type="2",  # market order
-                order_type="2",  # market order
-                match_price="1",  # use market price
+                type=order_type_value,  # 1=Open long, 2=Open short
+                order_type="1",  # Post-Only order (required by weex_client validation)
+                match_price="1",  # Use market price
+                preset_stop_loss_price=stop_loss_price,  # Stop loss
             )
 
             response = await self.client.place_order(order_request)
 
             # Extract order_id
-            order_id = (
-                response.get("data", {}).get("orderId")
-                or response.get("orderId")
-                or response.get("order_id")
-            )
+            # Handle close_positions response (returns list of results)
+            order_id = None
+            if isinstance(response, list) and len(response) > 0:
+                # Response is a list of close results
+                first_result = response[0]
+                order_id = first_result.get("successOrderId") or first_result.get("orderId")
+                if not first_result.get("success"):
+                    raise Exception(f"Close failed: {first_result.get('errorMessage', 'Unknown error')}")
+            elif isinstance(response, dict):
+                # Fallback for dict response
+                order_id = response.get("data", {}).get("orderId") or response.get("orderId")
 
             # Log AI decision
             if self.ai_logger and order_id:
                 await self.ai_logger.log_decision(
                     order_request={
                         "symbol": coin,
-                        "side": side,
+                        "type": order_type_value,
                         "size": size,
                         "order_type": "MARKET",
                         "order_id": order_id,
@@ -238,9 +258,28 @@ class PositionManager:
 
             add_log(
                 f"{coin}: Position opened successfully",
-                data={"order_id": order_id, "side": side, "size": size},
+                data={"order_id": order_id, "type": order_type_value, "size": size, "stop_loss": decision.stop_loss},
                 coin=coin,
             )
+
+            # Place take profit order if configured
+            if decision.take_profit:
+                # Wait a bit for position to be created
+                await asyncio.sleep(1)
+                try:
+                    await self._place_take_profit(
+                        symbol=coin,
+                        position_side="long" if decision.signal == "LONG" else "short",
+                        size=size,
+                        trigger_price=str(decision.take_profit),
+                        correlation_id=decision.correlation_id,
+                    )
+                except Exception as tp_error:
+                    add_log(
+                        f"{coin}: Failed to place take profit order: {tp_error}",
+                        level="WARNING",
+                        coin=coin,
+                    )
 
             return ActionResult(
                 coin=coin,
@@ -248,7 +287,7 @@ class PositionManager:
                 action_type="OPEN",
                 order_id=order_id or "",
                 details={
-                    "side": side,
+                    "type": order_type_value,
                     "size": size,
                     "signal": decision.signal,
                     "confidence": decision.confidence,
@@ -281,37 +320,20 @@ class PositionManager:
             await self.rate_limiter.wait()
 
             # Use close_positions API
-            response = await self.client.close_positions(
-                symbol=coin,
-                side="LONG",  # Close LONG by selling
-                size=size,
-            )
+            # closePositions only requires symbol - closes position automatically
+            response = await self.client.close_positions(symbol=coin)
 
-            order_id = (
-                response.get("data", {}).get("orderId")
-                or response.get("orderId")
-                or response.get("order_id")
-            )
-
-            # Log AI decision
-            if self.ai_logger:
-                await self.ai_logger.log_decision(
-                    order_request={
-                        "symbol": coin,
-                        "side": "CLOSE",
-                        "size": size,
-                        "order_type": "MARKET",
-                        "order_id": order_id,
-                    },
-                    decision_data={
-                        "stage": "Position Management",
-                        "action": "CLOSE",
-                        "reason": decision.reasoning,
-                        "signal": decision.signal,
-                        "confidence": decision.confidence,
-                        "correlation_id": decision.correlation_id,
-                    },
-                )
+            # Handle close_positions response (returns list of results)
+            order_id = None
+            if isinstance(response, list) and len(response) > 0:
+                # Response is a list of close results
+                first_result = response[0]
+                order_id = first_result.get("successOrderId") or first_result.get("orderId")
+                if not first_result.get("success"):
+                    raise Exception(f"Close failed: {first_result.get('errorMessage', 'Unknown error')}")
+            elif isinstance(response, dict):
+                # Fallback for dict response
+                order_id = response.get("data", {}).get("orderId") or response.get("orderId")
 
             add_log(
                 f"{coin}: Position closed successfully",
@@ -398,6 +420,47 @@ class PositionManager:
         requested_size = max(default_size, min_size)
         return str(max(requested_size, min_size))
 
+    async def _place_take_profit(
+        self,
+        symbol: str,
+        position_side: str,
+        size: str,
+        trigger_price: str,
+        correlation_id: str,
+    ) -> None:
+        """Place a take profit order using the TP/SL API."""
+        tp_client_oid = f"tp_{correlation_id}"
+        
+        # Weex TP/SL API expects uppercase positionSide
+        tp_payload = {
+            "symbol": symbol,
+            "clientOrderId": tp_client_oid,
+            "planType": "profit_plan",
+            "triggerPrice": trigger_price,
+            "executePrice": "0",  # Market price
+            "size": size,
+            "positionSide": position_side.upper(),  # Ensure uppercase
+        }
+        
+        add_log(
+            f"{symbol}: Placing TP order at {trigger_price}",
+            data={"payload": tp_payload},
+            coin=symbol,
+        )
+        
+        # Call Weex TP/SL API
+        tp_response = await self.client.request(
+            method="POST",
+            url_or_path="/capi/v2/order/placeTpSlOrder",
+            json=tp_payload,
+        )
+        
+        add_log(
+            f"{symbol}: Take profit order placed at {trigger_price}",
+            data={"tp_response": tp_response},
+            coin=symbol,
+        )
+
 
 # =============================================================================
 # Standalone Functions
@@ -432,9 +495,10 @@ async def close_all_positions() -> dict[str, dict]:
 
             try:
                 await rate_limiter.wait()
+                # weex_client requires side and size parameters
                 response = await client.close_positions(
                     symbol=symbol,
-                    side=side,
+                    side=side,  # LONG or SHORT
                     size=str(size),
                 )
 
@@ -463,26 +527,7 @@ async def close_all_positions() -> dict[str, dict]:
                     coin=symbol,
                 )
 
-                # Log AI decision
-                await ai_logger.log_decision(
-                    order_request={
-                        "symbol": symbol,
-                        "side": "CLOSE",
-                        "size": size,
-                        "order_type": "MARKET",
-                        "order_id": order_id,
-                    },
-                    decision_data={
-                        "stage": "Manual Close",
-                        "action": "CLOSE_ALL",
-                        "reason": "manual_intervention",
-                        "signal": "CLOSE",
-                        "confidence": 1.0,
-                        "position_side": side,
-                        "position_size": size,
-                        "close_order_id": order_id,
-                    },
-                )
+
 
             except Exception as e:
                 results[symbol] = {

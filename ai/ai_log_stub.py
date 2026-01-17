@@ -111,11 +111,11 @@ class AILogStub:
         # Log locally
         if self._logger:
             self._logger.warning(
-            f"[AI_LOG] Decision: {decision_data.get('signal', 'N/A')} | "
-            f"Symbol: {order_request.get('symbol', 'N/A')} | "
-            f"Stage: {decision_data.get('stage', 'Decision Making')} | "
-            f"Model: {self.MODEL_VERSION}"
-        )
+                f"[AI_LOG] Decision: {decision_data.get('signal', 'N/A')} | "
+                f"Symbol: {order_request.get('symbol', 'N/A')} | "
+                f"Stage: {decision_data.get('stage', 'Decision Making')} | "
+                f"Model: {self.MODEL_VERSION}"
+            )
 
         # Try to upload to Weex API with retry
         success = await self._upload_with_retry(
@@ -156,14 +156,17 @@ class AILogStub:
                     order_id=payload.get("orderId"),
                 )
 
-                if response.is_success:
+                # Check for success - code 00000 means success
+                is_success = getattr(response, 'is_success', False) or response.code == "00000"
+                if is_success:
                     self._upload_stats["success"] += 1
-                    self._logger.info(
-                        "[AI_LOG] Uploaded successfully to Weex",
-                        stage=payload["stage"],
-                        order_id=payload.get("orderId"),
-                        attempt=attempt + 1,
-                    )
+                    if self._logger:
+                        self._logger.info(
+                            "[AI_LOG] Uploaded successfully to Weex",
+                            stage=payload["stage"],
+                            order_id=payload.get("orderId"),
+                            attempt=attempt + 1,
+                        )
                     return True
                 else:
                     last_error = f"API error: {response.msg}"
@@ -250,8 +253,18 @@ class AILogStub:
             symbol=symbol,
         )
 
+        # Extract real order_id from order_request, fallback to timestamp
+        real_order_id = order_request.get("order_id")
+        if real_order_id:
+            try:
+                order_id_int = int(real_order_id)
+            except (ValueError, TypeError):
+                order_id_int = int(time.time() * 1000)
+        else:
+            order_id_int = int(time.time() * 1000)
+
         return {
-            "orderId": int(time.time() * 1000),
+            "orderId": order_id_int,
             "stage": stage,
             "model": self.MODEL_VERSION,
             "input": input_data,
@@ -347,7 +360,9 @@ class AILogStub:
         """
         if client_order_id not in self._pending_logs:
             if self._logger:
-                self._logger.warning(f"[AI_LOG] No pending log found for {client_order_id}")
+                self._logger.warning(
+                    f"[AI_LOG] No pending log found for {client_order_id}"
+                )
             return False
 
         # Update pending log with order ID

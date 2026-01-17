@@ -23,7 +23,7 @@ TAKE_PROFIT_PERCENT = 1.03  # 3% take profit
 RISK_REWARD_RATIO = 1.5
 
 # Loop settings
-LOOP_DELAY = 60  # seconds between iterations
+LOOP_DELAY = 300  # seconds between iterations
 MARKET_DATA_DELAY = 0.1  # seconds between coin fetches
 
 # Strategy confidence thresholds
@@ -32,7 +32,7 @@ SIGNAL_CONFIDENCE_STRONG = 0.75
 SIGNAL_CONFIDENCE_WEAK = 0.60
 
 # Minimum signals required for position
-MIN_BULLISH_SIGNALS = 3  # Need 3+ bullish timeframes for LONG
+MIN_BULLISH_SIGNALS = 4  # Need 3+ bullish timeframes for LONG
 
 # Paper trading mode - trades saved to disk, not sent to Weex
 # Can be enabled via environment variable: export PAPER_TRADING=true
