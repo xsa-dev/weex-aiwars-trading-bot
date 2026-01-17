@@ -38,3 +38,6 @@ timeframes:
   - "15m"
   - "1h"
   - "4h"
+
+# Trading settings
+paper_trading: true # Set to true for paper trading mode (trades saved to disk, not sent to Weex)
