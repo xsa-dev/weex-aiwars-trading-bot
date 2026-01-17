@@ -152,6 +152,7 @@ def calculate_bollinger_bands(
 
 
 def calculate_stoch_rsi(close: pd.Series, period: int = 14) -> tuple[float, float]:
+    """Calculate Stochastic RSI."""
     rsi = calculate_rsi(close, period)
 
     rsi_min = close.rolling(window=period).min()
@@ -160,19 +161,28 @@ def calculate_stoch_rsi(close: pd.Series, period: int = 14) -> tuple[float, floa
     stoch_rsi = (close - rsi_min) / (rsi_max - rsi_min)
 
     k = stoch_rsi.iloc[-1] * 100
-    d = k.rolling(window=3).mean().iloc[-1] if len(k) >= 3 else k.iloc[-1]
+    # k is a scalar (float), not a Series - need to keep history
+    stoch_rsi_k = k * 100  # k already contains the last value
+    
+    # Calculate d as 3-period SMA of k values
+    k_series = stoch_rsi * 100  # Full Series for rolling
+    d = k_series.rolling(window=3).mean().iloc[-1] if len(k_series) >= 3 else k
 
     return round(float(k), 1), round(float(d), 1)
 
 
-def calculate_vwma(close: pd.Series, volume: pd.Series, period: int = 20) -> float:
-    return round(
-        float(
-            (close * volume).rolling(window=period).sum()
-            / volume.rolling(window=period).sum()
-        ),
-        2,
-    )
+def calculate_vwma(close: pd.Series, volume: pd.Series, period: int = 20) -> float | None:
+    """Calculate Volume Weighted Moving Average."""
+    try:
+        vwma_series = (close * volume).rolling(window=period).sum() / volume.rolling(window=period).sum()
+        if vwma_series.empty:
+            return None
+        vwma = vwma_series.iloc[-1]
+        if pd.isna(vwma) or (isinstance(vwma, float) and vwma != vwma):  # Check for NaN
+            return None
+        return round(float(vwma), 2)
+    except (ZeroDivisionError, ValueError):
+        return None
 
 
 def calculate_indicators(df: pd.DataFrame, tf: str) -> dict[str, Any]:
@@ -254,10 +264,12 @@ def calculate_indicators(df: pd.DataFrame, tf: str) -> dict[str, Any]:
         vwma_cfg = cfg.get("vwma", {})
         result["vwma"] = calculate_vwma(close, volume, vwma_cfg.get("period", 20))
 
-        result["overall_trend"] = calculate_overall_trend(result, close.iloc[-1])
-
     except Exception as e:
         result["error"] = str(e)
+    
+    # ВСЕГДА рассчитываем тренд, даже если есть ошибки в индикаторах
+    if "close" in df.columns:
+        result["overall_trend"] = calculate_overall_trend(result, df["close"].iloc[-1])
 
     return result
 
@@ -306,10 +318,12 @@ def calculate_overall_trend(indicators: dict, price: float) -> str:
         else:
             score -= 1
 
-    if price > indicators.get("vwma", price):
+    vwma = indicators.get("vwma")
+    if vwma is not None and price > vwma:
         score += 0.5
-    else:
+    elif vwma is not None:
         score -= 0.5
+    # Если VWMA=None, score не меняется
 
     if score >= 3:
         return "BULLISH"
