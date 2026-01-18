@@ -11,7 +11,7 @@ class JSONFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         """Format log record as JSON."""
-        log_data = {
+        log_data: dict[str, Any] = {
             "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
             "level": record.levelname,
             "message": record.getMessage(),
@@ -19,14 +19,17 @@ class JSONFormatter(logging.Formatter):
         }
 
         # Add extra fields if present
-        if hasattr(record, "data") and record.data:
-            log_data["data"] = record.data
+        data = getattr(record, "data", None)
+        if data and isinstance(data, dict):
+            log_data["data"] = data
 
-        if hasattr(record, "coin") and record.coin:
-            log_data["coin"] = record.coin
+        coin = getattr(record, "coin", None)
+        if coin:
+            log_data["coin"] = coin
 
-        if hasattr(record, "error_type") and record.error_type:
-            log_data["error_type"] = record.error_type
+        error_type = getattr(record, "error_type", None)
+        if error_type:
+            log_data["error_type"] = error_type
 
         return json.dumps(log_data, ensure_ascii=False)
 

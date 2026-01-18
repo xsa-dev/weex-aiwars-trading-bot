@@ -6,7 +6,7 @@ from typing import Any
 from weex_client import WeexAsyncClient, config
 from weex_client.models import PlaceOrderRequest
 
-from ai.ai_log_stub import AILogStub
+from ai.ai_log import AILogStub
 from ai.config import PAPER_TRADING
 from ai.market_analyzer import MarketData, RateLimiter
 from ai.paper_storage import save_paper_trade
@@ -479,7 +479,7 @@ async def close_all_positions() -> dict[str, dict]:
     add_log("Closing all positions...", level="WARNING")
 
     client = WeexAsyncClient(config=settings)
-    ai_logger = AILogStub(client=client, logger=logger)
+    AILogStub(client=client, logger=logger)
     rate_limiter = RateLimiter()
 
     results: dict[str, dict] = {}

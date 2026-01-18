@@ -1,6 +1,7 @@
 """Market data collection, indicators calculation, and ML signal integration."""
 
 import asyncio
+from asyncio import to_thread
 import time
 from dataclasses import dataclass, field
 from functools import wraps
@@ -9,6 +10,7 @@ from typing import Any
 from weex_client import WeexAsyncClient
 
 from ai.config import CANDLES_CONFIG, TIMEFRAMES
+from ai.ensemble_voter import TechnicalSignal
 from utils.indicators import calculate_indicators, candles_to_df
 from utils.logger import add_log
 
@@ -168,11 +170,16 @@ class Indicators:
 class MLSignals:
     """ML-based market signals."""
 
+    coin: str = ""
     direction: str = "NEUTRAL"  # BULLISH, BEARISH, NEUTRAL
     confidence: float = 0.5
     reasoning: str = ""
     model_name: str = ""
     timestamp: str = ""
+    source_breakdown: dict[str, dict[str, Any]] | None = None
+    risk_level: str = "MEDIUM"
+    stop_loss: float | None = None
+    take_profit: float | None = None
 
 
 # =============================================================================
@@ -186,6 +193,78 @@ class MarketAnalyzer:
     def __init__(self, client: WeexAsyncClient, rate_limiter: RateLimiter):
         self.client = client
         self.rate_limiter = rate_limiter
+
+        # Ensemble clients (lazy loaded)
+        self._ml_client = None
+        self._news_client = None
+        self._llm_client = None
+        self._ensemble_voter = None
+        self._model_tracker = None
+
+    @property
+    def ml_client(self):
+        """Lazy load ML client for localhost:8000."""
+        if self._ml_client is None:
+            try:
+                from ai.ml_client import MLClient
+
+                self._ml_client = MLClient()
+            except Exception as e:
+                add_log(f"Failed to initialize ML client: {e}", level="ERROR")
+                self._ml_client = None
+        return self._ml_client
+
+    @property
+    def news_client(self):
+        """Lazy load News client for localhost:3001."""
+        if self._news_client is None:
+            try:
+                from ai.news_client import NewsClient
+
+                self._news_client = NewsClient()
+            except Exception as e:
+                add_log(f"Failed to initialize News client: {e}", level="ERROR")
+                self._news_client = None
+        return self._news_client
+
+    @property
+    def ensemble_voter(self):
+        """Lazy load Ensemble voter."""
+        if self._ensemble_voter is None:
+            try:
+                from ai.ensemble_voter import EnsembleVoter
+
+                self._ensemble_voter = EnsembleVoter()
+            except Exception as e:
+                add_log(f"Failed to initialize Ensemble voter: {e}", level="ERROR")
+                self._ensemble_voter = None
+        return self._ensemble_voter
+
+    @property
+    def model_tracker(self):
+        """Lazy load Model tracker."""
+        if self._model_tracker is None:
+            try:
+                from ai.model_tracker import ModelTracker
+
+                self._model_tracker = ModelTracker()
+            except Exception as e:
+                add_log(f"Failed to initialize Model tracker: {e}", level="ERROR")
+                self._model_tracker = None
+        return self._model_tracker
+
+    @property
+    def llm_client(self):
+        """Lazy load LLM client for DeepSeek/VSE API."""
+        if self._llm_client is None:
+            try:
+                from ai.llm_client import LLMClient
+
+                self._llm_client = LLMClient()
+            except Exception as e:
+                add_log(f"Failed to initialize LLM client: {e}", level="ERROR")
+                self._llm_client = None
+        return self._llm_client
 
     async def get_all_market_data(self, coins: list[str]) -> dict[str, MarketData]:
         """Fetch market data for all coins in parallel.
@@ -291,10 +370,10 @@ class MarketAnalyzer:
             next_funding_time=next_funding_time,
         )
 
-    def calculate_all_indicators(
+    async def calculate_all_indicators(
         self, market_data: dict[str, MarketData]
     ) -> dict[str, Indicators]:
-        """Calculate technical indicators for all coins.
+        """Calculate technical indicators for all coins in parallel.
 
         Args:
             market_data: Dict mapping coin -> MarketData
@@ -302,15 +381,174 @@ class MarketAnalyzer:
         Returns:
             Dict mapping coin -> Indicators
         """
+        if not market_data:
+            return {}
+
+        # Create tasks for all coins
+        tasks = [
+            self._calculate_indicators_for_coin(coin, data)
+            for coin, data in market_data.items()
+        ]
+
+        # Execute in parallel
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Build dict, handling exceptions
         indicators: dict[str, Indicators] = {}
+        for (coin, data), result in zip(market_data.items(), results):
+            if isinstance(result, Exception):
+                add_log(
+                    f"Error calculating indicators for {coin}: {result}",
+                    level="ERROR",
+                    coin=coin,
+                    error_type="indicator_error",
+                )
+            else:
+                indicators[coin] = result
 
-        for coin, data in market_data.items():
-            coin_indicators = self._calculate_indicators_for_coin(coin, data)
-            indicators[coin] = coin_indicators
-
+        add_log(f"Indicators calculated for {len(indicators)}/{len(market_data)} coins")
         return indicators
 
-    def _calculate_indicators_for_coin(self, coin: str, data: MarketData) -> Indicators:
+    def _build_positions_dict(
+        self, current_positions: list[dict[str, Any]]
+    ) -> dict[str, dict[str, Any]]:
+        """Convert list of positions to dict keyed by coin symbol.
+
+        Args:
+            current_positions: List of position dictionaries
+
+        Returns:
+            Dict mapping coin symbol -> position data
+        """
+        positions_dict: dict[str, dict[str, Any]] = {}
+        for position in current_positions:
+            coin = position.get("symbol") or position.get("coin")
+            if coin:
+                positions_dict[coin] = position
+        return positions_dict
+
+    def _build_technical_signal(self, coin: str, ind: Indicators) -> TechnicalSignal:
+        """Convert technical indicators to a TechnicalSignal for ensemble voting.
+
+        Args:
+            coin: Coin symbol
+            ind: Calculated indicators
+
+        Returns:
+            TechnicalSignal with direction, confidence, and reasoning
+        """
+        # Get 1h timeframe as primary reference
+        tf_data = ind.timeframes.get("1h", {})
+
+        # Determine overall direction from indicators
+        trend = tf_data.get("overall_trend", "NEUTRAL")
+        rsi = tf_data.get("rsi", 50)
+        rsi_signal = tf_data.get("rsi_signal", "")
+        adx = tf_data.get("adx", 0)
+        adx_strength = tf_data.get("adx_strength", "")
+        macd_hist = tf_data.get("macd_histogram", 0)
+        st_dir = tf_data.get("supertrend_direction", "N")
+        st_value = tf_data.get("supertrend_value", 0)
+
+        # Calculate technical direction and confidence
+        bullish_signals = 0
+        bearish_signals = 0
+        indicators_used: dict[str, Any] = {}
+
+        # Trend analysis
+        if trend == "BULLISH":
+            bullish_signals += 2
+            indicators_used["trend"] = "BULLISH"
+        elif trend == "BEARISH":
+            bearish_signals += 2
+            indicators_used["trend"] = "BEARISH"
+        else:
+            indicators_used["trend"] = "NEUTRAL"
+
+        # RSI analysis
+        if rsi > 70:
+            bearish_signals += 1
+            indicators_used["rsi"] = f"{rsi:.1f} (overbought)"
+        elif rsi < 30:
+            bullish_signals += 1
+            indicators_used["rsi"] = f"{rsi:.1f} (oversold)"
+        else:
+            indicators_used["rsi"] = f"{rsi:.1f}"
+
+        if rsi_signal:
+            indicators_used["rsi_signal"] = rsi_signal
+
+        # ADX analysis
+        if adx >= 25:
+            if adx_strength == "STRONG":
+                if trend == "BULLISH":
+                    bullish_signals += 1
+                elif trend == "BEARISH":
+                    bearish_signals += 1
+            indicators_used["adx"] = f"{adx:.1f} ({adx_strength})"
+        else:
+            indicators_used["adx"] = f"{adx:.1f} (weak)"
+
+        # MACD analysis
+        if macd_hist > 0:
+            bullish_signals += 1
+            indicators_used["macd"] = f"+{macd_hist:.4f}"
+        elif macd_hist < 0:
+            bearish_signals += 1
+            indicators_used["macd"] = f"{macd_hist:.4f}"
+        else:
+            indicators_used["macd"] = "0.0000"
+
+        # SuperTrend analysis
+        if st_dir == "UP":
+            bullish_signals += 1
+            indicators_used["supertrend"] = f"UP ({st_value:.2f})"
+        elif st_dir == "DOWN":
+            bearish_signals += 1
+            indicators_used["supertrend"] = f"DOWN ({st_value:.2f})"
+        else:
+            indicators_used["supertrend"] = f"N ({st_value:.2f})"
+
+        # Determine signal
+        if bullish_signals > bearish_signals:
+            direction = "bullish"
+        elif bearish_signals > bullish_signals:
+            direction = "bearish"
+        else:
+            direction = "neutral"
+
+        # Calculate confidence (0.5-0.9 range based on signal strength)
+        total_signals = bullish_signals + bearish_signals
+        if total_signals > 0:
+            max_signals = max(bullish_signals, bearish_signals)
+            confidence = 0.5 + (max_signals / total_signals) * 0.4
+        else:
+            confidence = 0.5
+
+        # Generate reasoning
+        reasoning_parts = []
+        if direction == "bullish":
+            reasoning_parts.append("Technical indicators suggest upward momentum")
+        elif direction == "bearish":
+            reasoning_parts.append("Technical indicators suggest downward pressure")
+        else:
+            reasoning_parts.append("Mixed technical signals")
+
+        if adx >= 25:
+            reasoning_parts.append(f"ADX {adx:.1f} indicates strong trend")
+
+        reasoning = ". ".join(reasoning_parts)
+
+        return TechnicalSignal(
+            signal=direction,
+            confidence=confidence,
+            reasoning=reasoning,
+            indicators_used=indicators_used,
+        )
+
+    async def _calculate_indicators_for_coin(
+        self, coin: str, data: MarketData
+    ) -> Indicators:
         """Calculate indicators for a single coin."""
         # Extract price from ticker
         price = "N/A"
@@ -332,10 +570,18 @@ class MarketAnalyzer:
 
         for tf, candles in data.candles.items():
             if candles:
-                df = candles_to_df(candles)
-                if not df.empty:
-                    ind = calculate_indicators(df, tf)
-                    timeframes[tf] = ind
+                try:
+                    df = await to_thread(candles_to_df, candles)
+                    if not df.empty:
+                        ind = await to_thread(calculate_indicators, df, tf)
+                        timeframes[tf] = ind
+                except Exception as e:
+                    add_log(
+                        f"Error calculating indicators for {coin} {tf}: {e}",
+                        level="ERROR",
+                        coin=coin,
+                        error_type="indicator_error",
+                    )
 
         # Get overall trend from 1h
         overall_trend = "NEUTRAL"
@@ -349,28 +595,199 @@ class MarketAnalyzer:
             overall_trend=overall_trend,
         )
 
-    async def get_ml_market_signals(self) -> MLSignals:
-        """Get ML-based market signals.
+    async def get_ml_market_signals(
+        self,
+        market_data: dict[str, MarketData],
+        indicators: dict[str, Indicators],
+        portfolio_drawdown: float = 0.0,
+        current_positions: list[dict[str, Any]] | None = None,
+    ) -> MLSignals:
+        """Get ML-based market signals using ensemble voting.
 
-        This queries external AI/ML models to determine overall market direction.
+        Combines:
+        - Technical analysis (RSI, ADX, MACD, SuperTrend)
+        - ML predictions (from localhost:8000)
+        - News sentiment (from localhost:3001)
+        - LLM analysis (TBD - from DeepSeek)
 
-        TODO: Implement actual ML integration
-        - OpenAI/Anthropic API for LLM analysis
-        - Or local ML model (Ollama/llama.cpp)
-        - Or Weex AI API if available
+        Args:
+            market_data: Dict mapping coin -> MarketData
+            indicators: Dict mapping coin -> Indicators
+            portfolio_drawdown: Current portfolio drawdown (0.0-1.0)
+            current_positions: List of current positions
 
         Returns:
-            MLSignals with direction, confidence, and reasoning
+            Single MLSignals representing aggregate market sentiment
         """
-        # Placeholder implementation
-        # TODO: Replace with actual ML API call
+        import time
+        from ai.config import ML_PREDICTION_HOURS
+
+        add_log("Getting ensemble ML market signals...")
+
+        coins = list(market_data.keys())
+        signals: dict[str, MLSignals] = {}
+
+        # Fetch ML predictions, News sentiment, and LLM analysis in parallel
+        add_log("Fetching ML predictions, News, and LLM analysis in parallel...")
+
+        ml_predictions: dict[str, Any] = {}
+        news_sentiments: dict[str, Any] = {}
+
+        async def get_ml_predictions_task() -> dict[str, Any]:
+            if self.ml_client:
+                try:
+                    add_log("Fetching ML predictions from localhost:8000...")
+                    predictions = await self.ml_client.get_all_ensemble_predictions(
+                        coins, prediction_hours=ML_PREDICTION_HOURS
+                    )
+                    add_log(f"ML predictions received for {len(predictions)} coins")
+                    return predictions
+                except Exception as e:
+                    add_log(
+                        f"Failed to get ML predictions: {e}",
+                        level="WARNING",
+                        error_type="ml_prediction_error",
+                    )
+            else:
+                add_log("ML client not available", level="WARNING")
+            return {}
+
+        async def get_news_sentiment_task() -> dict[str, Any]:
+            if self.news_client:
+                try:
+                    add_log(
+                        "Fetching news sentiment from https://free-crypto-news-api.cloudpub.ru..."
+                    )
+                    sentiments = await self.news_client.get_all_sentiments(coins)
+                    add_log(f"News sentiment received for {len(sentiments)} coins")
+                    return sentiments
+                except Exception as e:
+                    add_log(
+                        f"Failed to get news sentiment: {e}",
+                        level="WARNING",
+                        error_type="news_sentiment_error",
+                    )
+            else:
+                add_log("News client not available", level="WARNING")
+            return {}
+
+
+
+        # Run ML and News tasks in parallel (LLM handled separately in trading.py)
+        ml_predictions, news_sentiments = await asyncio.gather(
+            get_ml_predictions_task(),
+            get_news_sentiment_task(),
+        )
+
+        # Build positions dict
+        positions_dict = self._build_positions_dict(current_positions or [])
+
+        for coin in coins:
+            try:
+                ind = indicators.get(coin)
+                data = market_data.get(coin)
+
+                if not ind or not data:
+                    continue
+
+                # Build technical signal
+                technical_signal = self._build_technical_signal(coin, ind)
+
+                # Get ML and News signals
+                ml_signal = ml_predictions.get(coin)
+                news_signal = news_sentiments.get(coin)
+
+                # Get current position
+                current_position = positions_dict.get(coin)
+
+                # Generate ensemble signal
+                if self.ensemble_voter:
+                    ensemble = self.ensemble_voter.vote(
+                        coin=coin,
+                        price=ind.price,
+                        technical=technical_signal,
+                        llm=None,  # LLM handled separately in trading.py
+                        ml=ml_signal,
+                        news=news_signal,
+                        current_portfolio_drawdown=portfolio_drawdown,
+                        current_position=current_position,
+                    )
+
+                    signals[coin] = MLSignals(
+                        direction=ensemble.signal.upper(),
+                        confidence=ensemble.confidence,
+                        reasoning=ensemble.reasoning,
+                        model_name="ensemble",
+                        timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
+                        source_breakdown=ensemble.source_breakdown,
+                        risk_level=ensemble.risk_level,
+                        stop_loss=ensemble.stop_loss,
+                        take_profit=ensemble.take_profit,
+                    )
+                else:
+                    # Fallback to technical-only signal
+                    signals[coin] = MLSignals(
+                        direction=technical_signal.signal.upper(),
+                        confidence=technical_signal.confidence,
+                        reasoning=technical_signal.reasoning,
+                        model_name="technical",
+                        timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
+                    )
+
+                add_log(
+                    f"Signal for {coin}: {signals[coin].direction} ({signals[coin].confidence:.0%})",
+                    coin=coin,
+                )
+
+            except Exception as e:
+                add_log(
+                    f"Error generating signal for {coin}: {e}",
+                    level="ERROR",
+                    coin=coin,
+                    error_type="signal_generation_error",
+                )
+
+        add_log(f"Ensemble signals generated for {len(signals)}/{len(coins)} coins")
+
+        # Aggregate signals into a single market-wide MLSignals
+        if not signals:
+            return MLSignals(
+                direction="NEUTRAL",
+                confidence=0.5,
+                reasoning="No signals generated",
+                model_name="ensemble",
+                timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
+            )
+
+        # Count directions
+        directions: dict[str, int] = {}
+        total_confidence = 0.0
+        for sig in signals.values():
+            direction = sig.direction.upper()
+            directions[direction] = directions.get(direction, 0) + 1
+            total_confidence += sig.confidence
+
+        # Get most common direction
+        from collections import Counter
+
+        most_common = Counter(directions).most_common(1)[0]
+        aggregate_direction = most_common[0]
+        aggregate_confidence = total_confidence / len(signals)
+
+        # Generate aggregate reasoning
+        direction_counts = ", ".join(f"{d}: {c}" for d, c in sorted(directions.items()))
+        aggregate_reasoning = (
+            f"Market aggregate: {aggregate_direction} ({aggregate_confidence:.0%} confidence). "
+            f"Signal distribution: {direction_counts}. "
+            f"Analyzed {len(signals)} coins."
+        )
 
         return MLSignals(
-            direction="NEUTRAL",
-            confidence=0.5,
-            reasoning="ML signals not yet implemented",
-            model_name="placeholder",
-            timestamp="",
+            direction=aggregate_direction,
+            confidence=aggregate_confidence,
+            reasoning=aggregate_reasoning,
+            model_name="ensemble",
+            timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
         )
 
 

@@ -1,9 +1,7 @@
 """AI Trading Bot modules."""
 
-# Core trading loop
 from ai.trading import trade_loop, start_trading, stop_trading
 
-# Market analysis
 from ai.market_analyzer import (
     MarketAnalyzer,
     MarketData,
@@ -14,18 +12,36 @@ from ai.market_analyzer import (
     indicators_to_structured,
 )
 
-# Strategy
 from ai.strategy import Decision, Strategy, RiskLevel, assess_risk
 
-# Position management
 from ai.position_manager import PositionManager, ActionResult, close_all_positions
 
+# ML Client
+from ai.ml_client import MLClient, MLPrediction, EnsembleMLPrediction
+
+# News Client
+from ai.news_client import NewsClient, NewsSentiment, NewsArticle
+
+# LLM Client
+from ai.llm_client import LLMClient, LLMAnalysisResult, create_llm_client
+
+# Ensemble Voting
+from ai.ensemble_voter import (
+    EnsembleVoter,
+    EnsembleSignal,
+    TechnicalSignal,
+    LLMSignal,
+    MLPredictionSignal,
+    NewsSentimentSignal,
+)
+
+# Model Tracking
+from ai.model_tracker import ModelTracker, ModelPerformance
+
 __all__ = [
-    # Trading loop
     "trade_loop",
     "start_trading",
     "stop_trading",
-    # Market analyzer
     "MarketAnalyzer",
     "MarketData",
     "Indicators",
@@ -33,13 +49,25 @@ __all__ = [
     "RateLimiter",
     "format_indicators_log",
     "indicators_to_structured",
-    # Strategy
     "Decision",
     "Strategy",
     "RiskLevel",
     "assess_risk",
-    # Position manager
     "PositionManager",
     "ActionResult",
     "close_all_positions",
+    "MLClient",
+    "MLPrediction",
+    "EnsembleMLPrediction",
+    "NewsClient",
+    "NewsSentiment",
+    "NewsArticle",
+    "EnsembleVoter",
+    "EnsembleSignal",
+    "TechnicalSignal",
+    "LLMSignal",
+    "MLPredictionSignal",
+    "NewsSentimentSignal",
+    "ModelTracker",
+    "ModelPerformance",
 ]

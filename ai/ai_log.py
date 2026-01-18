@@ -11,6 +11,7 @@ This module provides AI decision logging functionality with:
 import asyncio
 import time
 from datetime import datetime
+from logging import Logger
 from typing import Any, Dict
 
 from weex_client import WeexAsyncClient
@@ -51,7 +52,7 @@ class AILogStub:
     def __init__(
         self,
         client: WeexAsyncClient | None = None,
-        logger=None,
+        logger: Logger | None = None,
     ):
         """
         Initialize AI Log stub.
@@ -303,8 +304,7 @@ class AILogStub:
         )
 
         # Extract real order_id from order_request, fallback to timestamp
-        real_order_id = order_request.get("order_id")
-        order_id_int = int(real_order_id)
+        order_id_int = order_request.get("order_id")
 
         return {
             "orderId": order_id_int,

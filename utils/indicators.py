@@ -1,5 +1,4 @@
 import pandas as pd
-import numpy as np
 from typing import Any
 from utils.config_loader import load_config
 
@@ -153,7 +152,7 @@ def calculate_bollinger_bands(
 
 def calculate_stoch_rsi(close: pd.Series, period: int = 14) -> tuple[float, float]:
     """Calculate Stochastic RSI."""
-    rsi = calculate_rsi(close, period)
+    calculate_rsi(close, period)
 
     rsi_min = close.rolling(window=period).min()
     rsi_max = close.rolling(window=period).max()
@@ -162,7 +161,7 @@ def calculate_stoch_rsi(close: pd.Series, period: int = 14) -> tuple[float, floa
 
     k = stoch_rsi.iloc[-1] * 100
     # k is a scalar (float), not a Series - need to keep history
-    stoch_rsi_k = k * 100  # k already contains the last value
+    k * 100  # k already contains the last value
     
     # Calculate d as 3-period SMA of k values
     k_series = stoch_rsi * 100  # Full Series for rolling

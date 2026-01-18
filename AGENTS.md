@@ -1,23 +1,30 @@
 # AI Trading Bot - SEMI_AUTO AGENTS.md
 
-**Generated:** 2026-01-17  
+**Generated:** 2026-01-18  
 **Python:** 3.14+ | **Package Manager:** uv
 
 ## Project Overview
 
-Weex exchange trading bot with AI indicator analysis. FastAPI backend with custom technical analysis indicators supporting 6 timeframes (1m, 15m, 1h, 4h, 1D, 1W).
+Weex exchange trading bot with AI-driven ensemble trading decisions. Combines technical analysis, LLM insights, ML predictions, and news sentiment for short-term leveraged trading.
 
 ## Structure
 
 ```
 semi-auto/
-├── ai/              # Trading logic and AI analysis
-├── api/             # FastAPI endpoints
-├── utils/           # Indicators, logging, config
-├── tests/           # Unit tests (pytest)
-├── main.py          # Entry point (uvicorn on port 8888)
-├── config.yaml      # Configuration file
-└── trading.log      # JSON structured logs
+├── ai/                   # Trading logic and AI analysis
+│   ├── trading.py        # Main trading loop orchestrator
+│   ├── strategy.py       # Trading signal generation
+│   ├── market_analyzer.py # Market data & indicator calculation
+│   ├── ml_client.py      # ML predictions client (localhost:8000)
+│   ├── news_client.py    # News sentiment client (localhost:3001)
+│   ├── ensemble_voter.py # Multi-source signal voting
+│   └── model_tracker.py  # ML model performance tracking
+├── api/                  # FastAPI endpoints
+├── utils/                # Indicators, logging, config
+├── tests/                # Unit tests (pytest)
+├── main.py               # Entry point (uvicorn on port 8888)
+├── config.yaml           # Configuration file
+└── trading.log           # JSON structured logs
 ```
 
 ## Commands
@@ -34,10 +41,13 @@ uv run python main.py
 uv run pytest tests/
 
 # Run with coverage
-uv run pytest tests/ --cov=utils --cov-report=term-missing
+uv run pytest tests/ --cov=ai --cov-report=term-missing
 
-# Run single test file
+# Run single test file (use full path or relative)
 uv run pytest tests/test_indicators.py -v
+uv run pytest tests/test_ml_client.py -v
+uv run pytest tests/test_ensemble_voter.py -v
+uv run pytest tests/test_config.py -v
 
 # Run single test class
 uv run pytest tests/test_indicators.py::TestCalculateVWMA -v
@@ -55,7 +65,17 @@ uv run ruff check --fix .
 ### Imports
 - Standard library → third-party → local
 - Explicit imports only (no `from x import *`)
-- Group with blank lines between groups
+- Group with blank lines between groups:
+  ```python
+  import asyncio
+  from dataclasses import dataclass
+  from typing import Any
+  
+  import aiohttp
+  
+  from ai.config import SETTINGS
+  from utils.logger import add_log
+  ```
 
 ### Naming
 - **Functions/variables:** `snake_case`
@@ -68,6 +88,7 @@ uv run ruff check --fix .
 - Explicit types for parameters and returns
 - Avoid `Any` - prefer `Union`, `Optional`, specific types
 - Built-in generics (`list[str]`, `dict[str, int]`) for Python 3.9+
+- Never suppress types with `as any`, `@ts-ignore`, `@ts-expect-error`
 
 ### Error Handling
 - Specific exceptions (`ValueError`, `TypeError`, `KeyError`)
@@ -80,7 +101,7 @@ uv run ruff check --fix .
       add_log(f"API error for {coin}: {e}", level="ERROR", coin=coin, error_type="api_failure")
       raise
   ```
-- Use `@retry_on_api_error` decorator for common patterns
+- Empty catch blocks are forbidden: `except: {}` ❌
 
 ### Logging
 - Use `utils.logger.add_log()` for structured logging:
@@ -90,30 +111,21 @@ uv run ruff check --fix .
 - Console: `[2026-01-17 15:00:00] INFO: message`
 - File (trading.log): JSON with `timestamp`, `level`, `message`, `data`, `coin`, `error_type`
 
-### Functions
+### Functions & Classes
 - Keep small - single responsibility
-- Use type hints for all parameters and returns
-- Add docstrings for complex functions
-
-### Classes
 - Use `@dataclass` for simple data containers
 - Prefer composition over deep inheritance
+- Add docstrings for complex functions
 
-### Testing
-- Test classes for grouped functionality
-- Test methods with descriptive names: `test_normal_data`, `test_zero_volume`
-- Mock external dependencies (API calls, file I/O)
+### Ensemble Trading System
+When adding new signals to the ensemble:
+1. Add signal class in `ai/ensemble_voter.py`
+2. Add weight in `SOURCE_WEIGHTS` (ai/config.py)
+3. Integrate in `MarketAnalyzer.get_ml_market_signals()`
+4. Add tests in `tests/test_ensemble_voter.py`
+5. Update `ai/__init__.py` exports
 
-### Configuration
-- Use `config.yaml` for environment-specific settings
-- Load via `utils.config_loader.load_config()`
-- Never hardcode magic numbers
-
-### API Integration (Weex)
-- Use `weex_client` for API calls
-- **Lowercase granularity**: `"1d"`, `"1w"` NOT `"1D"`, `"1W"`
-- Handle rate limits with exponential backoff
-- Use safe wrappers: `safe_get_kline()`, `safe_get_history_kline()`
+Current weights: Technical(30%), LLM(25%), ML Predictions(35%), News(10%)
 
 ### Anti-Patterns
 - ❌ Don't use `from utils import *`
@@ -122,18 +134,35 @@ uv run ruff check --fix .
 - ❌ Don't use global state
 - ❌ Don't ignore linting errors
 - ❌ Don't commit commented-out code
+- ❌ Don't use type suppression (`as any`, `@ts-ignore`)
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `ai/trading.py` | Trading logic, rate limiting, retry wrappers |
+| `ai/trading.py` | Main trading loop orchestrator |
+| `ai/ensemble_voter.py` | Multi-source signal voting system |
+| `ai/ml_client.py` | ML predictions from localhost:8000 |
+| `ai/news_client.py` | News sentiment from localhost:3001 |
 | `utils/indicators.py` | Technical analysis (RSI, MACD, ADX, etc.) |
 | `utils/logger.py` | Structured JSON logging |
 | `api/app.py` | FastAPI application |
-| `tests/test_indicators.py` | 29 unit tests for indicators |
+| `tests/` | Unit tests (29+ tests) |
+
+## External Services
+
+| Service | Host | Purpose |
+|---------|------|---------|
+| ML Server | localhost:8000 | Price predictions (12 models) |
+| News API | localhost:3001 | Crypto news sentiment (nirholas/free-crypto-news) |
+| Weex API | api.weex.com | Exchange trading |
 
 ## Common Tasks
+
+### Add New ML Model
+1. Add model name to `ML_AVAILABLE_MODELS` in `ai/config.py`
+2. ML server automatically includes it in predictions
+3. Performance tracked in `model_performance.json`
 
 ### Add New Indicator
 1. Implement in `utils/indicators.py`
@@ -142,12 +171,6 @@ uv run ruff check --fix .
 4. Update `config.yaml` if configurable
 
 ### Add New Timeframe
-1. Add to `CANDLES_CONFIG` in `ai/trading.py`
-2. Update `tf_order` in `format_all_timeframes_log()` and `indicators_to_structured()`
-
-## Notes
-
-- Russian comments mixed with English in legacy code (acceptable)
-- pandas/numpy used extensively for data processing
-- asyncio for concurrent API operations
-- Structured logging critical for debugging
+1. Add to `CANDLES_CONFIG` in `ai/config.py`
+2. Update `TIMEFRAMES` list
+3. Update `tf_order` in display/logging functions
