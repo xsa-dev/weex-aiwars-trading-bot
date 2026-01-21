@@ -168,7 +168,8 @@ class MLClient:
 
         total_tasks = len(coins) * len(model_list)
         add_log(
-            f"Fetching ML predictions for {len(coins)} coins × {len(model_list)} models ({total_tasks} total)"
+            f"Fetching ML predictions for {len(coins)} coins × {len(model_list)} models ({total_tasks} total)",
+            level="DEBUG",
         )
 
         tasks = []
@@ -177,26 +178,31 @@ class MLClient:
                 task = self.get_prediction(coin, model, hours)
                 tasks.append(task)
 
-        # Process with progress bar
+        # Use gather for proper parallel execution, then report progress
+        add_log("Waiting for ML predictions...", level="DEBUG")
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Process results and count successes
         predictions_by_coin: dict[str, list[MLPrediction]] = {
             coin: [] for coin in coins
         }
-        completed = 0
-        progress_interval = max(1, total_tasks // 10)  # Log every ~10%
+        success_count = 0
+        none_count = 0
+        error_count = 0
 
-        for i, coro in enumerate(asyncio.as_completed(tasks)):
-            try:
-                result = await coro
-                if isinstance(result, MLPrediction):
-                    predictions_by_coin[result.coin].append(result)
-            except Exception:
-                pass  # Skip exceptions, they're already handled in get_prediction
+        for result in results:
+            if isinstance(result, MLPrediction):
+                predictions_by_coin[result.coin].append(result)
+                success_count += 1
+            elif result is None:
+                none_count += 1
+            elif isinstance(result, Exception):
+                error_count += 1
 
-            completed += 1
-            if completed % progress_interval == 0 or completed == total_tasks:
-                add_log(
-                    f"ML predictions progress: {completed}/{total_tasks} ({completed * 100 // total_tasks}%)"
-                )
+        add_log(
+            f"ML predictions complete: {success_count} success, {none_count} none, {error_count} errors",
+            level="DEBUG",
+        )
 
         return predictions_by_coin
 
