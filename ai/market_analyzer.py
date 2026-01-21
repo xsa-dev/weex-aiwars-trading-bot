@@ -790,6 +790,29 @@ class MarketAnalyzer:
             timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
         )
 
+    async def close(self) -> None:
+        """Close all lazy-loaded client sessions."""
+        if self._ml_client:
+            try:
+                await self._ml_client.close()
+            except Exception:
+                pass
+            self._ml_client = None
+
+        if self._news_client:
+            try:
+                await self._news_client.close()
+            except Exception:
+                pass
+            self._news_client = None
+
+        if self._llm_client:
+            try:
+                await self._llm_client.close()
+            except Exception:
+                pass
+            self._llm_client = None
+
 
 # =============================================================================
 # Utility Functions

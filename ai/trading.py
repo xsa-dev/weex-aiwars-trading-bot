@@ -239,7 +239,8 @@ async def trade_loop():
                 success=(success_count == len(results)),
             )
 
-            # Close client
+            # Close all client sessions
+            await analyzer.close()
             await client.close()
             client = None
 
@@ -261,6 +262,7 @@ async def trade_loop():
             # Ensure client is closed
             if client is not None:
                 try:
+                    await analyzer.close()
                     await client.close()
                 except Exception:
                     pass
@@ -277,6 +279,7 @@ async def trade_loop():
             # Ensure client is closed
             if client is not None:
                 try:
+                    await analyzer.close()
                     await client.close()
                 except Exception:
                     pass

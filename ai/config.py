@@ -146,3 +146,15 @@ MIN_BULLISH_SIGNALS = 4  # Need 3+ bullish timeframes for LONG
 # Can be enabled via environment variable: export PAPER_TRADING=true
 PAPER_TRADING = os.getenv("PAPER_TRADING", "").lower() in ("true", "1", "yes")
 PAPER_TRADES_FILE = "paper_trades.json"
+
+# =============================================================================
+# Strategies Configuration
+# =============================================================================
+
+# Strategy enable/disable configuration
+STRATEGIES = {
+    "technical": {"enabled": True},
+    "trend": {"enabled": True},
+    "momentum": {"enabled": True},
+    "breakout": {"enabled": True},
+}
