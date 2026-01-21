@@ -83,6 +83,7 @@ async def trade_loop():
 
     rate_limiter = RateLimiter(base_delay=0.015)
     cycle_start_time = time.time()
+    client: WeexAsyncClient | None = None
 
     while bot_status["running"]:
         try:
@@ -240,6 +241,7 @@ async def trade_loop():
 
             # Close client
             await client.close()
+            client = None
 
             # =================================================================
             # Loop delay
@@ -256,6 +258,13 @@ async def trade_loop():
                 level="WARNING",
             )
             await asyncio.sleep(5)
+            # Ensure client is closed
+            if client is not None:
+                try:
+                    await client.close()
+                except Exception:
+                    pass
+                client = None
 
         except asyncio.CancelledError:
             add_log("Trade loop cancelled")
@@ -265,6 +274,20 @@ async def trade_loop():
             error_msg = str(e)
             add_log(f"Error: {error_msg}", level="ERROR")
             await asyncio.sleep(5)
+            # Ensure client is closed
+            if client is not None:
+                try:
+                    await client.close()
+                except Exception:
+                    pass
+                client = None
+
+    # Final cleanup
+    if client is not None:
+        try:
+            await client.close()
+        except Exception:
+            pass
 
     add_log("Trade loop stopped")
 
