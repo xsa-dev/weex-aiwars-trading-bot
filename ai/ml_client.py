@@ -166,8 +166,9 @@ class MLClient:
         hours = prediction_hours or self.prediction_hours
         model_list = models or self.models
 
+        total_tasks = len(coins) * len(model_list)
         add_log(
-            f"Fetching ML predictions for {len(coins)} coins × {len(model_list)} models"
+            f"Fetching ML predictions for {len(coins)} coins × {len(model_list)} models ({total_tasks} total)"
         )
 
         tasks = []
@@ -176,15 +177,26 @@ class MLClient:
                 task = self.get_prediction(coin, model, hours)
                 tasks.append(task)
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
+        # Process with progress bar
         predictions_by_coin: dict[str, list[MLPrediction]] = {
             coin: [] for coin in coins
         }
+        completed = 0
+        progress_interval = max(1, total_tasks // 10)  # Log every ~10%
 
-        for result in results:
-            if isinstance(result, MLPrediction):
-                predictions_by_coin[result.coin].append(result)
+        for i, coro in enumerate(asyncio.as_completed(tasks)):
+            try:
+                result = await coro
+                if isinstance(result, MLPrediction):
+                    predictions_by_coin[result.coin].append(result)
+            except Exception:
+                pass  # Skip exceptions, they're already handled in get_prediction
+
+            completed += 1
+            if completed % progress_interval == 0 or completed == total_tasks:
+                add_log(
+                    f"ML predictions progress: {completed}/{total_tasks} ({completed * 100 // total_tasks}%)"
+                )
 
         return predictions_by_coin
 
