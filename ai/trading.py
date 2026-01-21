@@ -2,12 +2,14 @@
 
 This module provides the main trading loop that orchestrates:
 1. MarketAnalyzer - collects data and calculates indicators
-2. Strategy - generates trading signals using AI
+2. EnsembleCombiner - generates trading signals from multiple strategies
 3. PositionManager - executes trading decisions
 """
 
 import asyncio
+import time
 from datetime import datetime
+from typing import Any
 
 from weex_client import WeexAsyncClient, config
 from weex_client.exceptions import WEEXRateLimitError
@@ -15,8 +17,9 @@ from weex_client.exceptions import WEEXRateLimitError
 from ai.ai_log import AILogStub
 from ai.config import LOOP_DELAY
 from ai.market_analyzer import MarketAnalyzer, RateLimiter
+from ai.monitoring import metrics, start_metrics_server
 from ai.position_manager import PositionManager
-from ai.strategy import Strategy
+from ai.strategies.ensemble import EnsembleCombiner
 from utils.logger import add_log
 
 settings = config.load_config()
@@ -70,7 +73,7 @@ async def trade_loop():
     1. Get ML market signals (1x per loop)
     2. Fetch market data for all coins (parallel)
     3. Calculate indicators for all coins
-    4. Generate trading decisions (List[Decision])
+    4. Generate trading decisions (List[Decision]) using EnsembleCombiner
     5. Execute all decisions
     """
     # Lazy import to avoid circular dependency
@@ -79,6 +82,7 @@ async def trade_loop():
     add_log("Trade loop started")
 
     rate_limiter = RateLimiter(base_delay=0.015)
+    cycle_start_time = time.time()
 
     while bot_status["running"]:
         try:
@@ -86,7 +90,7 @@ async def trade_loop():
             client = WeexAsyncClient(config=settings)
             ai_logger = AILogStub(client=client, logger=None)
             analyzer = MarketAnalyzer(client, rate_limiter)
-            strategy = Strategy(ml_enabled=True)
+            ensemble = EnsembleCombiner()
             position_mgr = PositionManager(
                 client=client,
                 ai_logger=ai_logger,
@@ -146,9 +150,9 @@ async def trade_loop():
                 )
 
             # =================================================================
-            # STEP 4: Generate trading decisions (List[Decision])
+            # STEP 4: Generate trading decisions using EnsembleCombiner
             # =================================================================
-            decisions = await strategy.generate_signal(
+            decisions = await ensemble.generate_decisions(
                 market_data=market_data,
                 indicators=indicators,
                 ml_signals=ml_signals,
@@ -221,6 +225,19 @@ async def trade_loop():
             success_count = sum(1 for r in results if r.success)
             add_log(f"Executed {success_count}/{len(results)} actions successfully")
 
+            # =================================================================
+            # Update metrics
+            # =================================================================
+            cycle_duration_ms = (time.time() - cycle_start_time) * 1000
+            non_hold_decisions = sum(1 for d in decisions if d.action_type != "HOLD")
+            
+            metrics.trading_cycle_completed(
+                coins_analyzed=len(decisions),
+                decisions=non_hold_decisions,
+                duration_ms=cycle_duration_ms,
+                success=(success_count == len(results)),
+            )
+
             # Close client
             await client.close()
 
@@ -229,6 +246,7 @@ async def trade_loop():
             # =================================================================
             bot_status["last_action"] = f"Processed {len(USER_COINS)} coins"
             add_log(f"Sleeping {LOOP_DELAY} seconds...")
+            cycle_start_time = time.time()
             await asyncio.sleep(LOOP_DELAY)
 
         except WEEXRateLimitError as e:
@@ -260,6 +278,15 @@ async def start_trading():
     if trade_task and not trade_task.done():
         add_log("Trade loop already running")
         return
+
+    # Initialize Prometheus metrics server (one-time)
+    if "metrics_initialized" not in bot_status:
+        try:
+            start_metrics_server(9090)
+            add_log("Prometheus metrics server started on port 9090")
+        except Exception as e:
+            add_log(f"Failed to start metrics server: {e}", level="WARNING")
+        bot_status["metrics_initialized"] = True
 
     bot_status["running"] = True
     bot_status["started_at"] = datetime.now().isoformat()

@@ -10,10 +10,41 @@ from ai.ai_log import AILogStub
 from ai.config import PAPER_TRADING
 from ai.market_analyzer import MarketData, RateLimiter
 from ai.paper_storage import save_paper_trade
-from ai.strategy import Decision
 from utils.logger import add_log, logger
 
 settings = config.load_config()
+
+
+# =============================================================================
+# Decision Data Class
+# =============================================================================
+
+
+@dataclass
+class Decision:
+    """Trading decision for a single coin.
+
+    Attributes:
+        coin: Coin symbol (e.g., 'cmt_btcusdt')
+        signal: Trading signal (LONG, SELL, HOLD)
+        confidence: Signal confidence (0.0-1.0)
+        reasoning: Explanation of the decision
+        stop_loss: Stop loss price (optional)
+        take_profit: Take profit price (optional)
+        action_type: Type of action (OPEN, CLOSE, REVERSE, HOLD)
+        correlation_id: Unique ID for AI logging
+        position_size: Position size (default 0.001)
+    """
+
+    coin: str
+    signal: str  # LONG, SELL, HOLD
+    confidence: float
+    reasoning: str
+    stop_loss: float | None = None
+    take_profit: float | None = None
+    action_type: str = "OPEN"  # OPEN, CLOSE, REVERSE, HOLD
+    correlation_id: str = ""
+    position_size: float = 0.001
 
 
 # =============================================================================

@@ -1,3 +1,4 @@
+import inspect
 import json
 import logging
 from collections import deque
@@ -6,16 +7,53 @@ from logging.handlers import RotatingFileHandler
 from typing import Any, Deque, Dict, List, Optional
 
 
+def _get_caller_logger_name() -> str:
+    """Get logger name from caller's module using inspect."""
+    frame = inspect.currentframe()
+    if frame is None:
+        return "unknown"
+
+    # Walk up the stack looking for the first frame that's not from utils.logger
+    # Skip: _get_caller_logger_name -> add_log -> caller
+    i = 0
+    while frame is not None:
+        frame = frame.f_back
+        i += 1
+        if frame is None:
+            return "unknown"
+
+        module = frame.f_globals.get("__name__", "")
+
+        # Skip utils.logger internals (this function and add_log)
+        if module == "utils.logger":
+            continue
+
+        # Skip logging module internals and builtins, but allow __main__
+        if (
+            module
+            and module != "__main__"
+            and not module.startswith("_")
+            and "logging" not in module
+        ):
+            return module.split(".")[-1] if "." in module else module
+        elif module == "__main__":
+            return "main"
+
+    return "unknown"
+
+
 class JSONFormatter(logging.Formatter):
     """Custom JSON formatter for structured logging."""
 
     def format(self, record: logging.LogRecord) -> str:
         """Format log record as JSON."""
+        logger_name = getattr(record, "logger", "trading")
+
         log_data: dict[str, Any] = {
             "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
             "level": record.levelname,
+            "logger": logger_name,
             "message": record.getMessage(),
-            "logger": "trading",
         }
 
         # Add extra fields if present
@@ -45,7 +83,8 @@ def setup_logger():
 
     # Readable formatter for console
     console_formatter = logging.Formatter(
-        "[%(asctime)s] %(levelname)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+        "[%(asctime)s] %(levelname)s [%(logger)s]: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
     )
 
     # File handler with JSON output
@@ -74,6 +113,7 @@ def add_log(
     data: Optional[Dict[str, Any]] = None,
     coin: Optional[str] = None,
     error_type: Optional[str] = None,
+    logger_name: Optional[str] = None,
 ):
     """Add structured log to memory, file, and console.
 
@@ -83,13 +123,19 @@ def add_log(
         data: Optional structured data dict for JSON logging
         coin: Optional coin symbol for filtering
         error_type: Optional error type for classification
+        logger_name: Optional logger name (auto-detected from caller if not provided)
     """
+    # Auto-detect logger name from caller if not provided
+    if logger_name is None:
+        logger_name = _get_caller_logger_name()
+
     timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
     # Store structured log in memory
     log_entry = {
         "timestamp": timestamp,
         "level": level.upper(),
+        "logger": logger_name,
         "message": message,
         "data": data,
         "coin": coin,
@@ -97,17 +143,8 @@ def add_log(
     }
     logs.append(log_entry)
 
-    # Log with extra fields
     log_level = getattr(logging, level.upper(), logging.INFO)
-    extra = {}
-    if data:
-        extra["data"] = data
-    if coin:
-        extra["coin"] = coin
-    if error_type:
-        extra["error_type"] = error_type
-
-    logger.log(log_level, message, extra=extra if extra else None)
+    logger.log(log_level, message, extra={"logger": logger_name})
 
 
 def add_order_book_snapshot(coin: str, data: Dict[str, Any], max_entries: int = 100):

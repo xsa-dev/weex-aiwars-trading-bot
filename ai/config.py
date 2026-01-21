@@ -43,6 +43,14 @@ SOURCE_WEIGHTS = {
     "ml_predictions": 0.35,
 }
 
+# Strategy weights for strategy ensemble combiner
+ENSEMBLE_WEIGHTS = {
+    "technical": 1.0,
+    "trend": 0.8,
+    "momentum": 0.8,
+    "breakout": 0.6,
+}
+
 # Confidence thresholds for trading decisions
 CONFIDENCE_THRESHOLD_BUY = 0.70  # 70% confidence for buy signals
 CONFIDENCE_THRESHOLD_SELL = 0.70  # 70% confidence for sell signals
