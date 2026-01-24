@@ -1,6 +1,6 @@
 # AI Trading Bot - SEMI_AUTO AGENTS.md
 
-**Generated:** 2026-01-18  
+**Generated:** 2026-01-24  
 **Python:** 3.14+ | **Package Manager:** uv
 
 ## Project Overview
