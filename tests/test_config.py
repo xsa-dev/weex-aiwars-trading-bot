@@ -25,23 +25,20 @@ class TestSourceWeights:
         total = sum(SOURCE_WEIGHTS.values())
         assert abs(total - 1.0) < 0.01
 
-    def test_no_news_weight(self):
-        """Test that news is not in weights."""
-        assert "news" not in SOURCE_WEIGHTS
-
     def test_expected_sources(self):
         """Test that expected sources are present."""
         assert "technical" in SOURCE_WEIGHTS
-        assert "llm" in SOURCE_WEIGHTS
         assert "ml_predictions" in SOURCE_WEIGHTS
+        assert "news" in SOURCE_WEIGHTS
+        assert "llm" not in SOURCE_WEIGHTS
 
-    def test_technical_highest_weight(self):
-        """Test that technical has highest weight."""
+    def test_ml_highest_weight(self):
+        """Test that ML predictions has highest weight."""
+        assert SOURCE_WEIGHTS["ml_predictions"] == 0.55
+
+    def test_technical_second_weight(self):
+        """Test that technical has second weight."""
         assert SOURCE_WEIGHTS["technical"] == 0.35
-
-    def test_ml_and_technical_equal(self):
-        """Test that ML and technical have equal weights."""
-        assert SOURCE_WEIGHTS["ml_predictions"] == SOURCE_WEIGHTS["technical"]
 
 
 class TestPositionMultiplier:

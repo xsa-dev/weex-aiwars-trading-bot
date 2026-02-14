@@ -167,6 +167,21 @@ Analyze each pair and provide trading signals and portfolio allocation.
 Current date: {current_date}.
 Output in the exact JSON format specified in the system prompt."""
 
+        # Prepare request for logging
+        request_data = {
+            "model": self.model,
+            "message_count": 2,
+            "coins": list(coins_data.keys()),
+            "temperature": 0.3,
+            "max_tokens": 10000,
+        }
+
+        add_log(
+            "LLM request initiated",
+            data=request_data,
+            coin=",".join(coins_data.keys()),
+        )
+
         try:
             response = await self.client.chat.completions.create(
                 model=self.model,
@@ -178,13 +193,57 @@ Output in the exact JSON format specified in the system prompt."""
                 max_tokens=10000,
             )
 
+            # Extract response metadata for logging
+            response_meta = {
+                "model": response.model,
+                "finish_reason": response.choices[0].finish_reason,
+                "content_length": len(response.choices[0].message.content) if response.choices[0].message.content else 0,
+            }
+
+            # Log token usage if available
+            if hasattr(response, "usage") and response.usage:
+                response_meta["prompt_tokens"] = response.usage.prompt_tokens
+                response_meta["completion_tokens"] = response.usage.completion_tokens
+                response_meta["total_tokens"] = response.usage.total_tokens
+
+            add_log(
+                "LLM response received",
+                data=response_meta,
+                coin=",".join(coins_data.keys()),
+            )
+
             content = response.choices[0].message.content
+
+            # Log content preview (first 200 chars)
+            add_log(
+                "LLM content preview",
+                data={"preview": content[:200] + "..." if len(content) > 200 else content},
+                coin=",".join(coins_data.keys()),
+            )
 
             result = self._extract_json(content)
 
             if result is None:
-                add_log(f"LLM parsing failed: {response.to_json()}", level="ERROR")
+                add_log(
+                    "LLM parsing failed",
+                    data={
+                        "full_response": content[:500] if content else "Empty response",
+                        "model": self.model,
+                    },
+                    level="ERROR",
+                    coin=",".join(coins_data.keys()),
+                )
                 return {}
+
+            # Log parsing success
+            add_log(
+                "LLM parsing successful",
+                data={
+                    "signals_count": len(result.get("signals", {})),
+                    "coins_analyzed": list(result.get("signals", {}).keys()),
+                },
+                coin=",".join(coins_data.keys()),
+            )
 
             # Convert to LLMSignal dict
             signals: dict[str, LLMSignal] = {}
@@ -206,7 +265,12 @@ Output in the exact JSON format specified in the system prompt."""
             return signals
 
         except Exception as e:
-            add_log(f"LLM error: {e}", level="ERROR")
+            add_log(
+                f"LLM error: {e}",
+                level="ERROR",
+                coin=",".join(coins_data.keys()),
+                error_type="llm_failure",
+            )
             return {}
 
     async def analyze_market(

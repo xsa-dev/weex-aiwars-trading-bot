@@ -39,8 +39,8 @@ COIN_KEYWORDS = {
 # Source weights for ensemble voting (must sum to 1.0)
 SOURCE_WEIGHTS = {
     "technical": 0.35,
-    "llm": 0.25,
-    "ml_predictions": 0.35,
+    "ml_predictions": 0.55,
+    "news": 0.10,
 }
 
 # Strategy weights for strategy ensemble combiner
@@ -79,19 +79,19 @@ def get_position_multiplier(confidence: float) -> float:
 # =============================================================================
 
 ML_SERVER_HOST = os.getenv("ML_SERVER_HOST", "http://localhost:8000")
-ML_REQUEST_TIMEOUT = 30  # seconds
+ML_REQUEST_TIMEOUT = 600  # seconds
 ML_PREDICTION_HOURS = 6  # Predict next 6 hours
 ML_AVAILABLE_MODELS = [
     "XGBRegressor",
     "LightGBM",
     "CatBoost",
     "RandomForestRegressor",
-    "ExtraTreesRegressor",
-    "LinearRegression",
-    "Ridge",
-    "ElasticNet",
-    "KNeighborsRegressor",
-    "SVR",
+    # "ExtraTreesRegressor",
+    # "LinearRegression",
+    # "Ridge",
+    # "ElasticNet",
+    # "KNeighborsRegressor",
+    # "SVR",
     "LSTM",
     "GRU",
 ]
@@ -121,7 +121,7 @@ CANDLES_CONFIG = {
 TIMEFRAMES = ["1m", "15m", "1h", "4h", "1D", "1W"]
 
 # Order execution settings
-DEFAULT_ORDER_SIZE = 0.001
+DEFAULT_ORDER_SIZE = 0.1
 MAX_RISK_PER_TRADE_USDT = 10.0  # Maximum risk in USDT per trade
 MAX_TOTAL_RISK_USDT = 80.0  # Maximum total risk in USDT
 MAX_OPEN_POSITIONS = 8  # Maximum number of open positions

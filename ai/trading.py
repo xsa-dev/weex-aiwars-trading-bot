@@ -25,6 +25,9 @@ from utils.logger import add_log
 settings = config.load_config()
 trade_task: asyncio.Task | None = None
 
+# Feature flags
+USE_LLM = False  # Set to True to enable LLM analysis
+
 
 def calculate_portfolio_drawdown(
     balance: list[dict[str, Any]], positions: list[dict[str, Any]]
@@ -241,6 +244,7 @@ async def trade_loop():
 
             # Close all client sessions
             await analyzer.close()
+            await ensemble.close()
             await client.close()
             client = None
 
@@ -263,6 +267,7 @@ async def trade_loop():
             if client is not None:
                 try:
                     await analyzer.close()
+                    await ensemble.close()
                     await client.close()
                 except Exception:
                     pass
@@ -280,6 +285,7 @@ async def trade_loop():
             if client is not None:
                 try:
                     await analyzer.close()
+                    await ensemble.close()
                     await client.close()
                 except Exception:
                     pass

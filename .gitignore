@@ -23,3 +23,5 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 paper_trades.json
+.infiniloom
+.opencode

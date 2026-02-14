@@ -11,6 +11,8 @@ from ai.config import PAPER_TRADING
 from ai.market_analyzer import MarketData, RateLimiter
 from ai.paper_storage import save_paper_trade
 from utils.logger import add_log, logger
+from utils.reward_tracker import RewardTracker
+from utils.pnl_calculator import calculate_pnl
 
 settings = config.load_config()
 
@@ -77,11 +79,14 @@ class PositionManager:
         client: WeexAsyncClient,
         ai_logger: AILogStub | None = None,
         rate_limiter: RateLimiter | None = None,
+        enable_reward_tracking: bool = True,
     ):
         self.client = client
         self.ai_logger = ai_logger
         self.rate_limiter = rate_limiter or RateLimiter()
         self.config = settings
+        self.enable_reward_tracking = enable_reward_tracking
+        self.reward_tracker = RewardTracker() if enable_reward_tracking else None
 
     async def execute_actions(
         self,
@@ -227,7 +232,8 @@ class PositionManager:
         """Open a new position."""
         # Weex futures API uses 'type' field:
         # 1 = Open long, 2 = Open short, 3 = Close long, 4 = Close short
-        order_type_value = "1" if decision.signal == "LONG" else "2"
+        # decision.signal contains "BUY" or "SELL" from ensemble.py
+        order_type_value = "1" if decision.signal == "BUY" else "2"
 
         add_log(
             f"{coin}: Opening {decision.signal} position",
@@ -249,7 +255,9 @@ class PositionManager:
                 order_type="1",  # Post-Only order (required by weex_client validation)
                 match_price="1",  # Use market price
                 preset_stop_loss_price=stop_loss_price,  # Stop loss
-                preset_take_profit_price=str(decision.take_profit) if decision.take_profit else None,  # Take profit
+                preset_take_profit_price=str(decision.take_profit)
+                if decision.take_profit
+                else None,  # Take profit
             )
 
             response = await self.client.place_order(order_request)
@@ -307,7 +315,21 @@ class PositionManager:
                 coin=coin,
             )
 
-
+            # Track trade opening for reward system
+            if self.reward_tracker and order_id:
+                entry_price_val = (
+                    decision.stop_loss * 0.98 if decision.stop_loss else 0
+                )  # approximate from SL
+                self.reward_tracker.save_trade_opened(
+                    trade_id=decision.correlation_id or str(order_id),
+                    coin=coin,
+                    entry_price=entry_price_val,
+                    direction=decision.signal,
+                    stop_loss=decision.stop_loss
+                    or (entry_price_val * 0.98 if entry_price_val else 0),
+                    take_profit=decision.take_profit
+                    or (entry_price_val * 1.03 if entry_price_val else 0),
+                )
 
             return ActionResult(
                 coin=coin,
@@ -347,9 +369,34 @@ class PositionManager:
         try:
             await self.rate_limiter.wait()
 
-            # Use close_positions API
-            # closePositions only requires symbol - closes position automatically
-            response = await self.client.close_positions(symbol=coin)
+            # Fetch current position to get side and size
+            positions = await self.client.get_all_positions()
+            current_position = None
+            for pos in positions:
+                if pos.get("symbol") == coin:
+                    current_position = pos
+                    break
+
+            if not current_position:
+                raise Exception(f"No open position found for {coin}")
+
+            position_side = current_position.get("side")
+            position_size = current_position.get("size")
+
+            if not position_side or not position_size:
+                raise Exception(f"Invalid position data for {coin}: side={position_side}, size={position_size}")
+
+            add_log(
+                f"{coin}: Closing {position_side} position, size={position_size}",
+                coin=coin,
+            )
+
+            # Use close_positions API with required parameters
+            response = await self.client.close_positions(
+                symbol=coin,
+                side=position_side,  # LONG or SHORT
+                size=str(position_size),
+            )
 
             # Handle close_positions response (returns list of results)
             order_id = None

@@ -26,7 +26,7 @@ if __name__ == "__main__":
         print(f"  ID: {model.id}, Owner: {model.owned_by}")
 
     # Test request to a model
-    print("\nTesting model...")
+    print("\nTesting model deepseek/deepseek-v3.2-speciale...")
     response = client.chat.completions.create(
         model="deepseek/deepseek-v3.2-speciale",
         messages=[
