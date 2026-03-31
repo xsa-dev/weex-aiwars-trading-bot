@@ -1,0 +1,22 @@
+output:
+  format: xml
+  model: claude
+  compression: balanced
+  token_budget: 0
+  line_numbers: true
+  show_directory_structure: true
+  show_file_summary: true
+scan:
+  include: []
+  exclude:
+    - "**/node_modules/**"
+    - "**/.git/**"
+    - "**/target/**"
+    - "**/__pycache__/**"
+    - "**/dist/**"
+    - "**/build/**"
+    - ".**"
+security:
+  scan_secrets: false
+  fail_on_secrets: false
+  redact_secrets: true

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from api.auth import verify_token
 from api.dependencies import bot_status, USER_COINS
 from api.models import RestartResponse, LogEntry
+from ai.paper_storage import get_paper_trades, clear_paper_trades
 from ai.trading import start_trading, stop_trading
 from utils.logger import logs, add_log, get_order_book_history
 
@@ -42,6 +43,35 @@ def get_config():
         "api_timeout": 30,
         "log_limit": 100,
     }
+
+
+@router.get("/paper-trades", dependencies=[Depends(verify_token)])
+def get_paper_trades_api(limit: int = 50):
+    """Get all paper trades."""
+    return get_paper_trades(limit)
+
+
+@router.delete("/paper-trades", dependencies=[Depends(verify_token)])
+def clear_paper_trades_api():
+    """Clear all paper trades."""
+    clear_paper_trades()
+    return {"status": "ok", "message": "Paper trades cleared"}
+
+
+@router.post("/start", dependencies=[Depends(verify_token)])
+async def start_bot():
+    """Start the trading bot."""
+    add_log("Start command received via API")
+    await start_trading()
+    return {"status": "ok", "message": "Trading bot started"}
+
+
+@router.post("/stop", dependencies=[Depends(verify_token)])
+async def stop_bot():
+    """Stop the trading bot."""
+    add_log("Stop command received via API")
+    await stop_trading()
+    return {"status": "ok", "message": "Trading bot stopped"}
 
 
 @router.post(

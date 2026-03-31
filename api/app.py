@@ -24,3 +24,12 @@ app.include_router(auth_router, prefix="/auth")
 app.include_router(status_router)
 app.include_router(weex_router)
 app.include_router(system_router)
+
+
+@app.post("/close-all-positions")
+async def close_all_positions():
+    """Закрывает все открытые позиции."""
+    from ai.position_manager import close_all_positions
+
+    results = await close_all_positions()
+    return {"results": results}

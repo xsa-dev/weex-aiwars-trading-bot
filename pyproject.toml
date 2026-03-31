@@ -1,10 +1,32 @@
 [project]
 name = "semi-auto"
 version = "0.1.0"
-description = "Add your description here"
+description = "AI Trading Bot with Ensemble Voting"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
-    "deepagents>=0.3.6",
-    "tavily-python>=0.7.19",
+    "aiohttp>=3.9.0",
+    "pandas>=2.0.0",
+    "pydantic>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.23.0",
+    "pyyaml>=6.0.0",
+    "openai>=1.0.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.1.0",
+    "weex-client @ file:///Users/alxy/Desktop/1PROJ/WEEKS_AIWARS/WEEX_INTEGRATION/weex_client",
+    "apscheduler>=3.10.0",
+    "pytz>=2024.1",
+    "prometheus-client>=0.19.0",
+    "watchdog>=4.0.0",
+    "aiosqlite>=0.19.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-cov>=7.0.0",
 ]

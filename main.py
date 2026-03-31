@@ -1,7 +1,12 @@
 import logging
+
 import uvicorn
+from dotenv import load_dotenv
 
 from api.app import app
+
+load_dotenv(".env")
+
 
 app.debug = True
 
